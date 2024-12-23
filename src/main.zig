@@ -1,35 +1,56 @@
 const std = @import("std");
+const log = std.log.scoped(.@"issue5/example");
+
 const Tardy = @import("tardy").Tardy(.auto);
 const Runtime = @import("tardy").Runtime;
 
+const StackContext = struct {
+    mutex: std.Thread.Mutex = .{},
+    stack: *std.ArrayList(usize),
+    item: usize,
+
+    fn init(allocator: std.mem.Allocator) !StackContext {
+        const st = try allocator.create(std.ArrayList(usize));
+        st.* = std.ArrayList(usize).init(allocator);
+        return .{
+            .stack = st,
+            .item = undefined,
+        };
+    }
+
+    pub fn deinit(self: *const StackContext) void {
+        self.stack.deinit();
+    }
+
+    fn append_task(_: *Runtime, _: void, context: *StackContext) !void {
+        context.mutex.lock();
+        defer context.mutex.unlock();
+
+        log.debug("appending {d} to stack", .{context.item});
+        try context.stack.append(context.item);
+        log.debug("items: {any}\n", .{context.stack.items});
+    }
+};
+
 pub fn main() !void {
-    var t = try Tardy.init(.{ .allocator = std.heap.page_allocator });
+    const allocator = std.heap.page_allocator;
+
+    var t = try Tardy.init(.{
+        .allocator = allocator,
+        .threading = .{ .multi = 1 },
+    });
     defer t.deinit();
 
-    // XXX: this stack is not visible in init: add to init params!
-    // var stack = std.ArrayList(usize).init(std.heap.page_allocator);
-    // defer stack.deinit();
-
-    // XXX: This struct fails with unable to unwrap null on utils.zig:27
-    // because it neads to be `packed` to have a backing_integer field.
-    // OTOH if I add packed it becomes u128 which fails on utils.zig:71.
-    const StackContext = struct {
-        stack: *std.ArrayList(usize),
-        item: usize,
-
-        fn append(_: *Runtime, _: void, context: @This()) !void {
-            try context.stack.append(context.item);
-        }
-    };
+    var stack_context = try StackContext.init(allocator);
+    defer stack_context.deinit();
 
     try t.entry(
-        {},
+        &stack_context,
         struct {
-            fn init(rt: *Runtime, _: void) !void {
-                var stack = std.ArrayList(usize).init(std.heap.page_allocator);
-                defer stack.deinit();
-
-                try rt.spawn(void, StackContext{ .stack = &stack, .item = 3 }, StackContext.append);
+            // this will be run in every runtime.
+            fn init(rt: *Runtime, context: *StackContext) !void {
+                context.item = 4;
+                try rt.spawn(void, context, StackContext.append_task);
             }
         }.init,
         {},
@@ -37,4 +58,6 @@ pub fn main() !void {
             fn deinit(_: *Runtime, _: void) !void {}
         }.deinit,
     );
+
+    std.debug.print("{any}\n", .{stack_context.stack.items});
 }
