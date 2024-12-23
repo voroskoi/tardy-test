@@ -49,8 +49,24 @@ pub fn main() !void {
         struct {
             // this will be run in every runtime.
             fn init(rt: *Runtime, context: *StackContext) !void {
-                context.item = 4;
-                try rt.spawn(void, context, StackContext.append_task);
+                var ctx1 = StackContext{
+                    .mutex = context.mutex,
+                    .stack = context.stack,
+                    .item = 3,
+                };
+                try rt.spawn(void, &ctx1, StackContext.append_task);
+                var ctx2 = StackContext{
+                    .mutex = context.mutex,
+                    .stack = context.stack,
+                    .item = 4,
+                };
+                try rt.spawn(void, &ctx2, StackContext.append_task);
+                var ctx3 = StackContext{
+                    .mutex = context.mutex,
+                    .stack = context.stack,
+                    .item = 5,
+                };
+                try rt.spawn(void, &ctx3, StackContext.append_task);
             }
         }.init,
         {},
@@ -59,5 +75,5 @@ pub fn main() !void {
         }.deinit,
     );
 
-    std.debug.print("{any}\n", .{stack_context.stack.items});
+    log.debug("Final items: {any}\n", .{stack_context.stack.items});
 }
